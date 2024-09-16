@@ -1,27 +1,43 @@
 package si.gaspervrhovsek;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.operators.multi.processors.UnicastProcessor;
-import jakarta.enterprise.context.control.ActivateRequestContext;
-import jakarta.transaction.Transactional;
 import si.gaspervrhovsek.db.MatchEventJpa;
 import si.gaspervrhovsek.db.MatchEventRepository;
 import si.gaspervrhovsek.models.MatchEvent;
 
 public class MatchStreamProcessor {
+    private static final Logger log = LoggerFactory.getLogger(MatchStreamProcessor.class);
+
     private final UnicastProcessor<MatchEvent> processor;
     private final AtomicBoolean isProcessing;
     private final MatchEventRepository repository;
 
+    private final List<MatchEvent> batch;
+    private final AtomicInteger batchSize;
+    private final AtomicInteger insertCount;
+    private final AtomicInteger lastBatchSize;
+    private static final int BATCH_SIZE_LIMIT = 100;
 
     public MatchStreamProcessor(final MatchEventRepository matchEventRepository) {
         this.processor = UnicastProcessor.create();
         this.isProcessing = new AtomicBoolean(false);
         this.repository = matchEventRepository;
+
+        this.batch = new ArrayList<>();
+        this.batchSize = new AtomicInteger(0);
+        this.insertCount = new AtomicInteger(0);
+        this.lastBatchSize = new AtomicInteger(0);
 
         startProcessing();
     }
@@ -30,11 +46,28 @@ public class MatchStreamProcessor {
         processor.onNext(matchEvent);
     }
 
+    public AtomicInteger getInsertCount() {
+        return insertCount;
+    }
+
+    public AtomicInteger getLastBatchSize() {
+        return lastBatchSize;
+    }
+
+    public void completeProcessing() {
+        processor.onComplete();
+    }
+
     private void startProcessing() {
         if (isProcessing.compareAndSet(false, true)) {
             processor.onItem().transformToUniAndMerge(this::processData)
+                    .onCompletion().invoke(() -> {
+                        lastBatchSize.set(batch.size());
+                        flushBatch();
+                    })
                     .subscribe().with(
-                            success -> {},
+                            success -> {
+                            },
                             failure -> System.err.println("Error processing data: " + failure)
                     );
         }
@@ -42,19 +75,41 @@ public class MatchStreamProcessor {
 
     private Uni<Void> processData(MatchEvent matchEvent) {
         return Uni.createFrom().voidItem().onItem().invoke(() -> {
-            insertNewMatchEvent(matchEvent);
+            synchronized (batch) {
+                batch.add(matchEvent);
+                if (batchSize.incrementAndGet() >= BATCH_SIZE_LIMIT) {
+                    flushBatch();
+                }
+            }
         });
     }
 
-    private void insertNewMatchEvent(final MatchEvent matchEvent) {
-        final var matchEventJpa = new MatchEventJpa();
-        matchEventJpa.id = UUID.randomUUID();
-        matchEventJpa.matchId = matchEvent.getMatchId();
-        matchEventJpa.marketId = matchEvent.getMarketId();
-        matchEventJpa.outcomeId = matchEvent.getOutcomeId();
-        matchEventJpa.specifiers = matchEvent.getSpecifiers();
-        matchEventJpa.createdAt = Instant.now();
+    private void flushBatch() {
+        List<MatchEvent> eventsToInsert;
+        synchronized (batch) {
+            if (batch.isEmpty()) {
+                return;
+            }
+            eventsToInsert = new ArrayList<>(batch);
+            batch.clear();
+            batchSize.set(0);
+        }
+        insertMatchEvents(eventsToInsert);
+    }
 
-        repository.insert(matchEventJpa);
+    private void insertMatchEvents(final List<MatchEvent> eventsToInsert) {
+        List<MatchEventJpa> jpas = new ArrayList<>();
+        for (MatchEvent event : eventsToInsert) {
+            final var matchEventJpa = new MatchEventJpa();
+            matchEventJpa.id = UUID.randomUUID();
+            matchEventJpa.matchId = event.getMatchId();
+            matchEventJpa.marketId = event.getMarketId();
+            matchEventJpa.outcomeId = event.getOutcomeId();
+            matchEventJpa.specifiers = event.getSpecifiers();
+            matchEventJpa.createdAt = Instant.now();
+            jpas.add(matchEventJpa);
+        }
+        insertCount.addAndGet(jpas.size());
+        repository.insertBatch(jpas);
     }
 }

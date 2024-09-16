@@ -1,5 +1,7 @@
 package si.gaspervrhovsek.db;
 
+import java.util.List;
+
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -18,6 +20,14 @@ public class MatchEventRepository implements PanacheRepository<MatchEventJpa> {
     @Transactional
     public void insert(MatchEventJpa matchEventJpa) {
         entityManager.persist(matchEventJpa);
+        entityManager.flush();
+    }
+
+    @Transactional
+    public void insertBatch(List<MatchEventJpa> matchEventJpas) {
+        for (MatchEventJpa jpa : matchEventJpas) {
+            entityManager.persist(jpa);
+        }
         entityManager.flush();
     }
 }

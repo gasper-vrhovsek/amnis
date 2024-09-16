@@ -29,24 +29,19 @@ public class DataStreamProcessor {
         Path path = Paths.get(filePath);
         final var lines = Files.lines(path).skip(1).toList();
 
+        System.out.println("Number of all lines is " + lines.size());
+
 
         final var iterable = Multi.createFrom().iterable(lines);
-        iterable.subscribe().with(
-                line -> {
-                    final var matchEvent = new MatchEvent(line);
+        iterable.onCompletion().invoke(() -> tempMap.forEach((key, value) -> value.completeProcessing()))
+                .subscribe().with(line -> {
+                            final var matchEvent = new MatchEvent(line);
 
-                    tempMap.computeIfAbsent(matchEvent.getMatchId(), matchId -> new MatchStreamProcessor(matchEventRepository));
-                    tempMap.get(matchEvent.getMatchId()).pushData(matchEvent);
-                },
-                error -> {
-                    System.err.println("Error: " + error);
-                    log.error("Error in subscribe with", error);
-                },
-                () -> {
-                    System.out.println("All processed in " + (System.currentTimeMillis() - startTimestamp));
-//                    final var allEvents = tempMap.entrySet().stream().map(stringListEntry -> stringListEntry.getValue().size()).reduce(Integer::sum);
-//                    System.out.println("Processed " + tempMap.keySet().size() + " different matches with sum of all entries = " + allEvents.orElse(0));
-                }
-        );
+                            tempMap.computeIfAbsent(matchEvent.getMatchId(), matchId -> new MatchStreamProcessor(matchEventRepository));
+                            tempMap.get(matchEvent.getMatchId()).pushData(matchEvent);
+                        },
+                        error -> log.error("Error in subscribe with", error),
+                        () -> log.info("All processed in {}", System.currentTimeMillis() - startTimestamp)
+                );
     }
 }
