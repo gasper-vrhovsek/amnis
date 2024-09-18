@@ -5,7 +5,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +24,7 @@ public class DataStreamProcessor {
     MatchEventRepository matchEventRepository;
 
     public void processFile(final String filePath, final long startTimestamp) throws IOException {
+
         final var tempMap = new ConcurrentHashMap<String, MatchStreamProcessor>();
         Path path = Paths.get(filePath);
         final var linesStream = Files.lines(path).skip(1);
@@ -32,14 +32,15 @@ public class DataStreamProcessor {
         final var iterable = Multi.createFrom().items(linesStream);
         iterable.onCompletion().invoke(() -> {
                     Multi.createFrom().iterable(tempMap.values()).subscribe().with(MatchStreamProcessor::completeProcessing);
+                    final var executionResult = matchEventRepository.getExecutionResult();
+                    log.info("Min created_at = {}, max created_at = {}", executionResult.minCreatedAt(), executionResult.maxCreatedAt());
                 })
                 .subscribe().with(line -> {
                             final var matchEvent = new MatchEvent(line);
                             tempMap.computeIfAbsent(matchEvent.getMatchId(), matchId -> new MatchStreamProcessor(matchEventRepository));
                             tempMap.get(matchEvent.getMatchId()).pushData(matchEvent);
                         },
-                        error -> log.error("Error in subscribe with", error),
-                        () -> log.info("All processed in {}", System.currentTimeMillis() - startTimestamp)
+                        error -> log.error("Error in subscribe with", error)
                 );
     }
 }
