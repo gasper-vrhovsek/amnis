@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,15 +26,11 @@ public class DataStreamProcessor {
 
     public void processFile(final String filePath, final long startTimestamp) throws IOException {
         final var tempMap = new ConcurrentHashMap<String, MatchStreamProcessor>();
-
         Path path = Paths.get(filePath);
-        final var lines = Files.lines(path).skip(1).toList();
-        log.info("Number of all lines is {} this took {}", lines.size(), System.currentTimeMillis() - startTimestamp);
+        final var linesStream = Files.lines(path).skip(1);
 
-        final var iterable = Multi.createFrom().iterable(lines);
-        log.info("Iterable from lines, this took {}", System.currentTimeMillis() - startTimestamp);
+        final var iterable = Multi.createFrom().items(linesStream);
         iterable.onCompletion().invoke(() -> {
-                    log.info("Invoking on completion, this took {}", System.currentTimeMillis() - startTimestamp);
                     Multi.createFrom().iterable(tempMap.values()).subscribe().with(MatchStreamProcessor::completeProcessing);
                 })
                 .subscribe().with(line -> {

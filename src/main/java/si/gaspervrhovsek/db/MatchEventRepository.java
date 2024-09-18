@@ -1,33 +1,44 @@
 package si.gaspervrhovsek.db;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
-import io.quarkus.hibernate.orm.panache.PanacheRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.vertx.mutiny.pgclient.PgPool;
+import io.vertx.mutiny.sqlclient.Tuple;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.persistence.EntityManager;
-import jakarta.transaction.Transactional;
+import si.gaspervrhovsek.models.MatchEvent;
 
 @ApplicationScoped
-public class MatchEventRepository implements PanacheRepository<MatchEventJpa> {
-    private final EntityManager entityManager;
+public class MatchEventRepository {
+    private static final Logger log = LoggerFactory.getLogger(MatchEventRepository.class);
+
+    private final PgPool client;
 
     @Inject
-    public MatchEventRepository(final EntityManager entityManager) {
-        this.entityManager = entityManager;
+    public MatchEventRepository(final PgPool client) {
+        this.client = client;
     }
 
-    @Transactional
-    public void insert(MatchEventJpa matchEventJpa) {
-        entityManager.persist(matchEventJpa);
-        entityManager.flush();
-    }
+    public void insertBatch(List<MatchEvent> matchEventList) {
+        final var batch = matchEventList.stream().map(event -> Tuple.of(
+                UUID.randomUUID(),
+                event.getMatchId(),
+                event.getMarketId(),
+                event.getOutcomeId(),
+                event.getSpecifiers(),
+                LocalDateTime.now()
+        )).toList();
 
-    @Transactional
-    public void insertBatch(List<MatchEventJpa> matchEventJpas) {
-        for (MatchEventJpa jpa : matchEventJpas) {
-            entityManager.persist(jpa);
-        }
-        entityManager.flush();
+        client.withTransaction(sqlConnection -> sqlConnection.preparedQuery(
+                                "INSERT INTO match_events (id, match_id, market_id, outcome_id, specifiers, created_at) VALUES ($1, $2, $3, $4, $5, $6)")
+                                                        .executeBatch(batch)
+                                                        .onItem().invoke(() -> log.debug("Batch insert successful"))
+                                                        .onFailure().invoke(err -> log.error("Batch insert error", err)))
+                .await().indefinitely();
     }
 }

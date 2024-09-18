@@ -1,18 +1,16 @@
 package si.gaspervrhovsek;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.operators.multi.processors.UnicastProcessor;
-import si.gaspervrhovsek.db.MatchEventJpa;
 import si.gaspervrhovsek.db.MatchEventRepository;
 import si.gaspervrhovsek.models.MatchEvent;
 
@@ -25,7 +23,7 @@ public class MatchStreamProcessor {
 
     private final List<MatchEvent> batch;
     private final AtomicInteger batchSize;
-    private static final int BATCH_SIZE_LIMIT = 100;
+    private static final int BATCH_SIZE_LIMIT = 1000;
 
     public MatchStreamProcessor(final MatchEventRepository matchEventRepository) {
         this.processor = UnicastProcessor.create();
@@ -44,10 +42,6 @@ public class MatchStreamProcessor {
 
     public void completeProcessing() {
         processor.onComplete();
-    }
-
-    public List<MatchEvent> getBatch() {
-        return batch;
     }
 
     private void startProcessing() {
@@ -78,22 +72,13 @@ public class MatchStreamProcessor {
             insertMatchEvents(batch);
             batch.clear();
             batchSize.set(0);
-
         }
     }
 
     private void insertMatchEvents(final List<MatchEvent> eventsToInsert) {
-        List<MatchEventJpa> jpas = new ArrayList<>();
-        for (MatchEvent event : eventsToInsert) {
-            final var matchEventJpa = new MatchEventJpa();
-            matchEventJpa.id = UUID.randomUUID();
-            matchEventJpa.matchId = event.getMatchId();
-            matchEventJpa.marketId = event.getMarketId();
-            matchEventJpa.outcomeId = event.getOutcomeId();
-            matchEventJpa.specifiers = event.getSpecifiers();
-            matchEventJpa.createdAt = Instant.now();
-            jpas.add(matchEventJpa);
+        if (eventsToInsert.isEmpty()) {
+            return;
         }
-        repository.insertBatch(jpas);
+        repository.insertBatch(eventsToInsert);
     }
 }
