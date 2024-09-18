@@ -28,15 +28,16 @@ public class DataStreamProcessor {
 
         Path path = Paths.get(filePath);
         final var lines = Files.lines(path).skip(1).toList();
-
-        System.out.println("Number of all lines is " + lines.size());
-
+        log.info("Number of all lines is {} this took {}", lines.size(), System.currentTimeMillis() - startTimestamp);
 
         final var iterable = Multi.createFrom().iterable(lines);
-        iterable.onCompletion().invoke(() -> tempMap.forEach((key, value) -> value.completeProcessing()))
+        log.info("Iterable from lines, this took {}", System.currentTimeMillis() - startTimestamp);
+        iterable.onCompletion().invoke(() -> {
+                    log.info("Invoking on completion, this took {}", System.currentTimeMillis() - startTimestamp);
+                    Multi.createFrom().iterable(tempMap.values()).subscribe().with(MatchStreamProcessor::completeProcessing);
+                })
                 .subscribe().with(line -> {
                             final var matchEvent = new MatchEvent(line);
-
                             tempMap.computeIfAbsent(matchEvent.getMatchId(), matchId -> new MatchStreamProcessor(matchEventRepository));
                             tempMap.get(matchEvent.getMatchId()).pushData(matchEvent);
                         },

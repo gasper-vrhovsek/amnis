@@ -25,8 +25,6 @@ public class MatchStreamProcessor {
 
     private final List<MatchEvent> batch;
     private final AtomicInteger batchSize;
-    private final AtomicInteger insertCount;
-    private final AtomicInteger lastBatchSize;
     private static final int BATCH_SIZE_LIMIT = 100;
 
     public MatchStreamProcessor(final MatchEventRepository matchEventRepository) {
@@ -36,8 +34,6 @@ public class MatchStreamProcessor {
 
         this.batch = new ArrayList<>();
         this.batchSize = new AtomicInteger(0);
-        this.insertCount = new AtomicInteger(0);
-        this.lastBatchSize = new AtomicInteger(0);
 
         startProcessing();
     }
@@ -46,25 +42,18 @@ public class MatchStreamProcessor {
         processor.onNext(matchEvent);
     }
 
-    public AtomicInteger getInsertCount() {
-        return insertCount;
-    }
-
-    public AtomicInteger getLastBatchSize() {
-        return lastBatchSize;
-    }
-
     public void completeProcessing() {
         processor.onComplete();
+    }
+
+    public List<MatchEvent> getBatch() {
+        return batch;
     }
 
     private void startProcessing() {
         if (isProcessing.compareAndSet(false, true)) {
             processor.onItem().transformToUniAndMerge(this::processData)
-                    .onCompletion().invoke(() -> {
-                        lastBatchSize.set(batch.size());
-                        flushBatch();
-                    })
+                    .onCompletion().invoke(this::flushBatch)
                     .subscribe().with(
                             success -> {
                             },
@@ -85,16 +74,12 @@ public class MatchStreamProcessor {
     }
 
     private void flushBatch() {
-        List<MatchEvent> eventsToInsert;
         synchronized (batch) {
-            if (batch.isEmpty()) {
-                return;
-            }
-            eventsToInsert = new ArrayList<>(batch);
+            insertMatchEvents(batch);
             batch.clear();
             batchSize.set(0);
+
         }
-        insertMatchEvents(eventsToInsert);
     }
 
     private void insertMatchEvents(final List<MatchEvent> eventsToInsert) {
@@ -109,7 +94,6 @@ public class MatchStreamProcessor {
             matchEventJpa.createdAt = Instant.now();
             jpas.add(matchEventJpa);
         }
-        insertCount.addAndGet(jpas.size());
         repository.insertBatch(jpas);
     }
 }
