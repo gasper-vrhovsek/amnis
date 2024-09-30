@@ -1,5 +1,8 @@
 # amnis
 
+To run just use `mvn quarkus:dev`, the program will read the `fo_random.txt`, process it and insert the results into PostgreSQL.
+To access the processed data connect to the DB at `jdbc:postgresql://localhost:5434/postgres`. Both username and password are `quarkus`.
+
 This project uses Quarkus, the Supersonic Subatomic Java Framework.
 
 If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
